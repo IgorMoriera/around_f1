@@ -56,4 +56,3 @@ jobs:
         if: failure()
         run: |
           echo "::error::Weekly update failed. Verifique os logs da ingestão acima."
-          

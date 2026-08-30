@@ -10,13 +10,20 @@ from f1_platform.utils.heartbeat import write_heartbeat
 
 load_dotenv()
 
-REPO_ID = os.getenv("HF_DATASET_REPO", "Igor-Moreira/f1-analytics-data")
-HF_TOKEN = os.getenv("HF_TOKEN")
-SEASON = int(os.getenv("SEASON", "2026"))
+# 🚨 Alteração importante: uso do 'or' garante que strings vazias sejam substituídas pelo repositório real
+REPO_ID = os.getenv("HF_DATASET_REPO") or "Igor-Moreira/f1-analytics-data"
+HF_TOKEN = os.getenv("HF_TOKEN") or ""
+
+# Tratamento seguro da temporada para não quebrar se vier vazio do GitHub
+season_env = os.getenv("SEASON")
+SEASON = int(season_env) if season_env and season_env.strip() else 2026
+
 DRY_RUN = os.getenv("DRY_RUN", "false").lower() == "true"
 OUTPUT_DIR = Path("data/f1-data")
 
 print(f"--- INICIANDO ROTINA SEMANAL ({SEASON}) ---")
+print(f"Buscando histórico no repositório: {REPO_ID}")
+
 pending = pending_sessions(SEASON, REPO_ID)
 print(f"Sessões pendentes localizadas: {len(pending)}")
 
@@ -38,13 +45,16 @@ if not DRY_RUN and pending:
 
     if ingested:
         print("\nSincronizando novos Parquets com o Hugging Face...")
-        api = HfApi()
-        api.upload_folder(
-            folder_path=str(OUTPUT_DIR),
-            repo_id=REPO_ID,
-            repo_type="dataset",
-        )
-        print("Sincronização concluída!")
+        try:
+            api = HfApi()
+            api.upload_folder(
+                folder_path=str(OUTPUT_DIR),
+                repo_id=REPO_ID,
+                repo_type="dataset",
+            )
+            print("🚀 Sincronização concluída!")
+        except Exception as e:
+            print(f"⚠️ Erro ao fazer upload para o Hugging Face: {e}")
 
 # Grava o Heartbeat garantindo que sempre haverá um commit na semana
 write_heartbeat(pending, ingested)

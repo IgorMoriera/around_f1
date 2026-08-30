@@ -3,32 +3,22 @@ from pathlib import Path
 import fastf1
 import pandas as pd
 
-# Pasta de cache local para evitar baixar os mesmos dados da API do FastF1 múltiplas vezes
 CACHE = Path("data/cache")
 
 
 def ingest_session(spec: dict, out_root: Path) -> list[Path]:
-    """Download one session and write telemetry + laps + weather partitions.
-
-    Overwriting a partition makes a re-run idempotent.
-    """
     CACHE.mkdir(parents=True, exist_ok=True)
     fastf1.Cache.enable_cache(CACHE)
 
-    # Carrega a sessão específica usando a API do FastF1
-    session = fastf1.get_session(spec["season"], spec["round"], spec["session_name"])
-    session.load(telemetry=True, laps=True, weather=True)
-
     written = []
-
-    # Caminho HIVE unificado
     part = f"season={spec['season']}/event={spec['event']}/session={spec['session']}"
     session_dir = out_root / "telemetry" / part
     session_dir.mkdir(parents=True, exist_ok=True)
 
-    # --- 1. LAPS ---
-    # Proteção: Se a API da F1 falhar e não entregar os dados, saímos graciosamente
+    # 🚨 PROTEÇÃO APRIMORADA: Captura falhas de conexão e Rate Limits logo no carregamento
     try:
+        session = fastf1.get_session(spec["season"], spec["round"], spec["session_name"])
+        session.load(telemetry=True, laps=True, weather=True)
         laps = session.laps.copy()
     except Exception as e:
         print(f"⚠️ Falha na API da F1 para {spec['event']} - {spec['session']}: {e}")
@@ -70,25 +60,16 @@ def ingest_session(spec: dict, out_root: Path) -> list[Path]:
     if frames:
         tel_df = pd.concat(frames, ignore_index=True)
 
-        # Mapeamento de dtypes estritos
         numeric_cols = {
-            "Speed": "float32",
-            "RPM": "int32",
-            "Throttle": "float32",
-            "Brake": "bool",
-            "nGear": "int8",
-            "Distance": "float32",
-            "Time": "timedelta64[ns]",
-            "SessionTime": "timedelta64[ns]"
+            "Speed": "float32", "RPM": "int32", "Throttle": "float32",
+            "Brake": "bool", "nGear": "int8", "Distance": "float32",
+            "Time": "timedelta64[ns]", "SessionTime": "timedelta64[ns]"
         }
-
         for col, dtype in numeric_cols.items():
             if col in tel_df.columns:
                 tel_df[col] = tel_df[col].astype(dtype)
 
-        # Padroniza as colunas para minúsculas
         tel_df.columns = [c.lower() for c in tel_df.columns]
-
         p_tel = session_dir / "data.parquet"
         tel_df.to_parquet(p_tel, compression="snappy", index=False)
         written.append(p_tel)
@@ -97,7 +78,6 @@ def ingest_session(spec: dict, out_root: Path) -> list[Path]:
     if session.weather_data is not None and not session.weather_data.empty:
         weather_df = session.weather_data.copy()
         weather_df.columns = [c.lower() for c in weather_df.columns]
-
         p_weather = session_dir / "weather.parquet"
         weather_df.to_parquet(p_weather, compression="snappy", index=False)
         written.append(p_weather)
